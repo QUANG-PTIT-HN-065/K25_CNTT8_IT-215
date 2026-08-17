@@ -1,0 +1,34 @@
+Phần 1: Xác định quan hệ
+
+| Cặp đối tượng  | Loại quan hệ |
+| -------------- | ------------ |
+| Fleet – Driver |   1-N        |
+| Driver – Car   |   N-N        |
+
+Câu 1: ForeignKey của Driver – Fleet đặt ở đâu?
+
+Đặt fleet_id ở bảng Driver:
+
+fleet_id = Column(Integer, ForeignKey("fleets.id"))
+
+Vì:
+
+Một Fleet có nhiều Driver.
+Một Driver chỉ thuộc một Fleet.
+Trong quan hệ 1-N, khóa ngoại thường đặt ở phía N
+
+Câu 2: Driver – Car đi qua bảng nào?
+
+Quan hệ N-N giữa Driver và Car được thực hiện thông qua bảng trung gian:
+
+Booking
+
+Mô hình:
+
+Driver             Booking              Car
+   │                  │                  │
+   │ 1                │ N                │ 1
+   └──────────────────┤──────────────────┘
+                      │
+                 driver_id
+                 car_id
