@@ -1,21 +1,24 @@
 from fastapi import FastAPI
 
 from database import Base, engine
-from models import User
-from router import router
 
+from models import User
+
+from router import router
 
 Base.metadata.create_all(bind=engine)
 
+
 app = FastAPI(
-    title="JWT Authentication API"
+    title="DevConnect Authentication API",
+    description="Bcrypt & JWT Authentication System",
 )
+
 
 app.include_router(router)
 
 
 @app.get("/")
 def root():
-    return {
-        "message": "JWT Authentication API is running"
-    }
+
+    return {"message": "DevConnect API is running"}
