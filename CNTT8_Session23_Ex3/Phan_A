@@ -1,0 +1,170 @@
+PHẦN A. BÁO CÁO PHÂN TÍCH VÀ THIẾT KẾ
+A1. Phân tích Input / Output của từng API
+
+
+1. POST /auth/login
+
+Input: username, password (Kiểu dữ liệu: Form Data hoặc JSON)
+
+Output thành công: JWT access token (200 OK)
+
+Trường hợp lỗi: 401 (Sai tài khoản/mật khẩu), 403 (Tài khoản bị khóa)
+
+2. GET /users/me
+
+Input: Authorization Header (Kiểu dữ liệu: Bearer <token>)
+
+Output thành công: Thông tin chi tiết người dùng hiện tại (200 OK)
+
+Trường hợp lỗi: 401 (Token sai/hết hạn), 403 (Tài khoản bị khóa)
+
+3. GET /resources
+
+Input: Authorization Header (Kiểu dữ liệu: Bearer <token>)
+
+Output thành công: Danh sách tài nguyên (User: chỉ thấy tài liệu công khai; Admin: thấy tất cả) (200 OK)
+
+Trường hợp lỗi: 401 (Chưa xác thực), 403 (Tài khoản bị khóa)
+
+4. GET /resources/{resource_id}
+
+Input: resource_id (Path - int), Authorization Header
+
+Output thành công: Chi tiết tài nguyên (200 OK)
+
+Trường hợp lỗi: 401 (Unauth), 403 (Locked), 404 (Không tồn tại hoặc User thường cố xem tài liệu chưa xuất bản)
+
+5. POST /resources
+
+Input: title, description, url, is_published (JSON Body), Authorization Header
+
+Output thành công: Thông tin tài nguyên vừa được tạo (201 Created)
+
+Trường hợp lỗi: 401 (Unauth), 403 (Không phải Admin hoặc bị khóa)
+
+6. PATCH /resources/{resource_id}/publish
+
+Input: resource_id (Path - int), is_published (JSON Body), Authorization Header
+
+Output thành công: Thông tin tài nguyên đã được cập nhật trạng thái xuất bản (200 OK)
+
+Trường hợp lỗi: 401 (Unauth), 403 (Không phải Admin), 404 (Không tìm thấy tài nguyên)
+
+7. DELETE /resources/{resource_id}
+
+Input: resource_id (Path - int), Authorization Header
+
+Output thành công: Thông báo xóa thành công (200 OK)
+
+Trường hợp lỗi: 401 (Unauth), 403 (Không phải Admin), 404 (Không tìm thấy tài nguyên)
+
+8. GET /health
+
+Input: Không có
+
+Output thành công: {"status": "UP"} (200 OK)
+
+Trường hợp lỗi: Không có
+
+
+A2. Đề xuất Giải pháp Kỹ thuật
+Tạo & Giải mã JWT: Sử dụng thư viện python-jose với thuật toán HS256. Token chứa sub (username), role, và exp (thời gian hết hạn - ví dụ 30 phút).
+
+Xác định Current User (Tránh Bẫy 1 & Bẫy 2):
+
+Giải mã token, kiểm tra chữ ký và exp.
+
+Lấy username từ sub trong token, sau đó truy vấn lại Database/System State.
+
+Kiểm tra xem user có tồn tại không và trạng thái is_active có bằng True hay không (Xử lý Bẫy 1: Tài khoản bị khóa sau khi cấp token).
+
+Không tin tưởng hoàn toàn role trong token: Mọi quyết định phân quyền đều dựa trên role truy vấn từ hệ thống/database thực tế của user đó (Xử lý Bẫy 2).
+
+Dependency Phân quyền:
+
+get_current_user: Tách riêng nhiệm vụ giải mã, xác thực token và kiểm tra tài khoản hoạt động.
+
+require_admin: Phụ thuộc vào get_current_user, sau đó kiểm tra user["role"] == "admin". Nếu không thỏa mãn, trả về 403 Forbidden.
+
+Middleware:
+
+Không thực hiện logic xác thực JWT trong Middleware để tránh can thiệp vào các API công khai hay preflight request.
+
+Tạo request_id bằng uuid.uuid4(), đo process_time bằng time.perf_counter(), bổ sung 2 Header vào response và ghi log dạng INFO.
+
+CORS (Xử lý Bẫy 4):
+
+Sử dụng CORSMiddleware với danh sách allow_origins=["http://localhost:3000", "http://localhost:5173"].
+
+Cấu hình allow_methods=["*"], allow_headers=["*"], allow_credentials=True.
+
+Trình duyệt gửi OPTIONS sẽ được Middleware CORS phản hồi ngay lập tức mà không yêu cầu header Authorization.
+
+Mã lỗi HTTP Chuẩn hóa:
+
+401 Unauthorized: Token thiếu, hết hạn (Bẫy 3), chữ ký sai, hoặc sai credentials khi đăng nhập.
+
+403 Forbidden: Đã xác thực thành công nhưng không đủ quyền Admin hoặc tài khoản bị khóa (is_active = False).
+
+404 Not Found: Tài nguyên không tồn tại, hoặc khi User thường cố truy cập tài nguyên chưa publish (Bẫy 5 - bảo mật giấu sự tồn tại của dữ liệu nội bộ).
+
+A3. Thiết kế Luồng Xử lý (Sequential Steps)
+Luồng 1: Đăng nhập (POST /auth/login)
+
+Client gửi username và password.
+
+Hệ thống tìm username trong dữ liệu hệ thống. Nếu không thấy -> Trả về 401.
+
+Kiểm tra password. Nếu không khớp -> Trả về 401.
+
+Kiểm tra is_active. Nếu False -> Trả về 403.
+
+Tạo JWT Payload (sub, role, exp). Ký token bằng SECRET_KEY và trả về Client.
+
+Luồng 2: Lấy Current User (get_current_user Dependency)
+
+Trích xuất Bearer Token từ Header Authorization.
+
+Giải mã Token với SECRET_KEY và HS256. Nếu lỗi chữ ký hoặc hết hạn (exp) -> Trả về 401.
+
+Lấy username = payload.get("sub"). Nếu thiếu sub -> Trả về 401.
+
+Tìm user trong hệ thống theo username. Nếu không thấy -> Trả về 401.
+
+Kiểm tra user["is_active"]. Nếu False -> Trả về 403.
+
+Trả về đối tượng user hợp lệ cho endpoint.
+
+Luồng 3: Kiểm tra Quyền Admin (require_admin Dependency)
+
+Gọi get_current_user để lấy current_user hợp lệ.
+
+Kiểm tra current_user["role"] == "admin".
+
+Nếu Đúng -> Cho phép đi tiếp vào controller/endpoint.
+
+Nếu Sai -> Ném ra lỗi HTTP 403 Forbidden.
+
+Luồng 4: Xử lý Request qua Custom Middleware
+
+Lấy thời điểm bắt đầu start_time = time.perf_counter().
+
+Tạo request_id = str(uuid.uuid4()).
+
+Cho request đi tiếp qua call_next(request).
+
+Tính process_time = time.perf_counter() - start_time.
+
+Ghi log thông tin request (request_id, method, url, status_code, process_time).
+
+Gán X-Request-ID và X-Process-Time vào response headers và trả về Client.
+
+Luồng 5: CORS Preflight (OPTIONS)
+
+Trình duyệt gửi request OPTIONS tới endpoint.
+
+FastApi CORSMiddleware bắt request trước tiên.
+
+Kiểm tra Header Origin. Nếu thuộc danh sách White-list (localhost:3000, localhost:5173) -> Trả về 200 OK kèm các CORS Headers (Access-Control-Allow-Origin, Access-Control-Allow-Methods,...).
+
+Luồng xử lý kết thúc ngay tại CORS Middleware, không đi qua Authentication hay Custom Middleware.
